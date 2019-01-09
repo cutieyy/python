@@ -4,15 +4,12 @@ from splinter.browser import Browser
 from contextlib import closing
 import requests, json, time, re, os, sys, time
 from bs4 import BeautifulSoup
-
 def get_headers(header_raw):
     """
     通过原生请求头获取请求头字典
     :param header_raw: {str} 浏览器请求头
     :return: {dict} headers
-    请求头的话是为了模仿手机端发送的http请求；http请求有header和body两部分组成；
-
-抖音后端应该是添加了检测header内user-agent这个字段的代码如果不加请求头的话，不加user-agent的话爬虫发送请求时默认的user-agent是python agent；这样的话就请求不到数据，抖音应该是对这个进行了检测。
+    相当于客户端请求
     """
     return dict(line.split(": ", 1) for line in header_raw.split("\n"))
 
@@ -42,6 +39,7 @@ class DouYin(object):
         """
         video_names = []
         video_urls = []
+        un_watermark_url = []
         unique_id = ''
         while unique_id != user_id:
             search_url = 'https://api.amemv.com/aweme/v1/discover/search/?cursor=0&keyword=%s&count=10&type=1&is_pull_refresh=1&hot_search=0&search_source=find_friends&ts=1546862651&js_sdk_version=1.6.4&app_type=normal&manifest_version_code=390&_rticket=1546862652557&ac=wifi&device_id=61169876551&iid=55828869798&mcc_mnc=46001&os_version=8.1.0&channel=update&version_code=390&device_type=AWM-A0&language=zh&uuid=867693040182341&resolution=1080*2160&openudid=34124b9fe8b35bb7&update_version_code=3902&app_name=aweme&version_name=3.9.0&os_api=27&device_brand=blackshark&ssmix=a&device_platform=android&dpi=420&aid=1128&as=a1854453fbd3bc70c34699&cp=483fc65fb2323101e1Sy[g&mas=01a5b8073feec0967d1a375f621da2c36f9c9c6c2cccc60cecc646' % user_id
@@ -63,8 +61,8 @@ User-Agent: com.ss.android.ugc.aweme/390 (Linux; U; Android 8.1.0; zh_CN; AWM-A0
             unique_id = html['user_list'][0]['user_info']['unique_id']
 
         i = 1
-        aweme_count = 20   #每次爬取20个视频
-        max_cursor = 0   #下一批视频的起始位置
+        aweme_count = 20  #每次请求下载20个视频
+        max_cursor = 0   #下载初始值
         while True:
 
 
@@ -85,12 +83,13 @@ User-Agent: com.ss.android.ugc.aweme/390 (Linux; U; Android 8.1.0; zh_CN; AWM-A0
                     video_names.append(share_desc +'_'+str(i)+ '.mp4')
                     i += 1
                 video_urls.append(each['share_info']['share_url'])
+                un_watermark_url.append(each['video']['play_addr']['url_list'][0])  #无水印链接，加个list保存这个链接，之后就可以直接用
             if html['has_more']!=1:
                 break;
             max_cursor = html['max_cursor']
 
 
-        return video_names, video_urls, nickname
+        return video_names, video_urls, nickname,un_watermark_url
 
     def get_download_url(self, video_url):
         """
@@ -112,7 +111,7 @@ User-Agent: com.ss.android.ugc.aweme/390 (Linux; U; Android 8.1.0; zh_CN; AWM-A0
         # download_url = video_html['video']['play_addr']['url_list'][0]
 
         return video_url_js[12:-1]
-    def video_downloader(self, video_url, video_name, watermark_flag=False):
+    def video_downloader(self, video_url, video_name,un_watermark_url=None, watermark_flag=True):
         """
         视频下载
         Parameters:
@@ -124,7 +123,8 @@ User-Agent: com.ss.android.ugc.aweme/390 (Linux; U; Android 8.1.0; zh_CN; AWM-A0
         """
         size = 0
         if watermark_flag == True:
-            video_url = self.remove_watermark(video_url)
+            # video_url = self.remove_watermark(video_url)
+            video_url = un_watermark_url
         else:
             video_url = self.get_download_url(video_url)
         headers = {
@@ -169,9 +169,9 @@ User-Agent: com.ss.android.ugc.aweme/390 (Linux; U; Android 8.1.0; zh_CN; AWM-A0
             None
         """
         # self.hello()
-        user_id = input('请输入ID(例如40103580):')
-        # user_id = '1749761959'
-        video_names, video_urls, nickname = self.get_video_urls(user_id)
+        # user_id = input('请输入ID(例如40103580):')
+        user_id = '1749761959'
+        video_names, video_urls, nickname,un_watermark_url = self.get_video_urls(user_id)
         if nickname not in os.listdir():
             os.mkdir(nickname)
         print('视频下载中:共有%d个作品!\n' % len(video_urls))
@@ -183,7 +183,7 @@ User-Agent: com.ss.android.ugc.aweme/390 (Linux; U; Android 8.1.0; zh_CN; AWM-A0
                 video_name = video_names[num].replace('/', '')
             else:
                 video_name = video_names[num]
-            self.video_downloader(video_urls[num], os.path.join(nickname, video_name))
+            self.video_downloader(video_urls[num], os.path.join(nickname, video_name),un_watermark_url[num],True)
             print('\n')
 
         print('下载完成!')
